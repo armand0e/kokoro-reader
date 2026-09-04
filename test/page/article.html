@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>The History of Speech Synthesis — Test Article</title>
+    <style>
+      body { font-family: Georgia, serif; margin: 0; color: #222; }
+      header.site { background: #111; color: #fff; padding: 12px 24px; display: flex; gap: 20px; }
+      nav a { color: #ddd; margin-right: 12px; }
+      .layout { display: flex; gap: 32px; max-width: 1100px; margin: 24px auto; padding: 0 20px; }
+      article { flex: 1; line-height: 1.6; font-size: 18px; }
+      aside { width: 260px; background: #f3f3f3; padding: 16px; font-size: 14px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      .hidden { display: none; }
+      pre { background: #eee; padding: 10px; }
+      footer.site { background: #eee; padding: 20px; text-align: center; margin-top: 40px; }
+      .scroller { height: 120px; overflow: auto; border: 1px solid #ccc; padding: 8px; }
+    </style>
+  </head>
+  <body>
+    <header class="site">
+      <strong>Example News</strong>
+      <nav><a href="#">Home</a><a href="#">World</a><a href="#">Tech</a><a href="#">Login</a></nav>
+    </header>
+    <a class="sr-only" href="#main">Skip to main content</a>
+    <div class="layout">
+      <article id="main">
+        <h1>The History of Speech Synthesis</h1>
+        <p class="byline">By <a href="#">Jane Doe</a> · Published Jan. 5, 2026</p>
+        <p>
+          Speech synthesis is the artificial production of human speech. A computer system used for this purpose is called a
+          <em>speech synthesizer</em>, and it can be implemented in software or hardware products. Dr. Franklin S. Cooper and his
+          colleagues at Haskins Laboratories built the Pattern Playback in the late 1940s.
+        </p>
+        <h2>Early mechanical devices</h2>
+        <p>
+          In 1779 the German-Danish scientist Christian Gottlieb Kratzenstein won the first prize in a competition announced by the
+          Russian Imperial Academy of Sciences for models he built of the human vocal tract that could produce the five long vowel sounds.
+          This was followed by the bellows-operated "acoustic-mechanical speech machine" of Wolfgang von Kempelen of Pressburg, Hungary,
+          described in a 1791 paper. It cost about $5.50 to build, or so the story goes!
+        </p>
+        <ul>
+          <li>1779: Kratzenstein's vowel resonators.</li>
+          <li>1791: Von Kempelen's speaking machine.</li>
+          <li>1939: Bell Labs demonstrates the Voder at the World's Fair.</li>
+        </ul>
+        <blockquote>"The Voder was the first attempt to electronically synthesize human speech by breaking it down into its acoustic components."</blockquote>
+        <h2>Neural text-to-speech</h2>
+        <p>
+          Modern systems such as Kokoro use neural networks trained on many hours of recorded speech. With only 82 million parameters,
+          Kokoro produces natural sounding speech in real time on ordinary laptops<span class="hidden"> (this text is hidden and must not be read)</span>.
+          Is this the end of robotic voices? Probably. It certainly sounds like it.
+        </p>
+        <pre><code>const tts = await KokoroTTS.from_pretrained(model_id);</code></pre>
+        <div class="scroller">
+          <p>This paragraph lives inside a scrollable container. It should still be extracted and highlighted correctly when read aloud.</p>
+          <p>Second paragraph inside the scroller, with a number like 3.14 and an abbreviation such as etc. in the middle of a sentence.</p>
+          <p>Third paragraph inside the scroller.</p>
+        </div>
+        <p>Final paragraph of the article. Thanks for reading.</p>
+      </article>
+      <aside>
+        <h3>Related</h3>
+        <p>Sidebar content that should be skipped in smart mode.</p>
+      </aside>
+    </div>
+    <footer class="site">© 2026 Example News · Privacy · Terms</footer>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+const v = await fetch("http://127.0.0.1:9222/json/version").then(r=>r.json());
+const ws = new WebSocket(v.webSocketDebuggerUrl); await new Promise(r=>ws.onopen=r);
+let id=0; const pend=new Map();
+ws.onmessage = e => { const m=JSON.parse(e.data); if(m.id&&pend.has(m.id)){ const p=pend.get(m.id); pend.delete(m.id); m.error?p.rej(new Error(JSON.stringify(m.error))):p.res(m.result);} };
+const send=(method,params={},sessionId)=>new Promise((res,rej)=>{pend.set(++id,{res,rej}); ws.send(JSON.stringify({id,method,params,sessionId}));});
+const ev = async (sid, expression) => { const r = await send("Runtime.evaluate",{expression, awaitPromise:true, returnByValue:true}, sid); return r.exceptionDetails ? "EXC "+(r.exceptionDetails.exception?.description||r.exceptionDetails.text) : r.result.value; };
+const { targetInfos } = await send("Target.getTargets");
+const off = targetInfos.find(t=>t.url.includes("/offscreen/offscreen.html"));
+const EXT = new URL(off.url).host;
+const { sessionId: so } = await send("Target.attachToTarget",{targetId: off.targetId, flatten:true});
+const blobUrl = await ev(so, "URL.createObjectURL(new Blob(['hello wav'], {type:'audio/wav'}))");
+console.log("blob url:", blobUrl);
+// wake SW
+await ev(so, "chrome.runtime.sendMessage({target:'background', type:'cs:getState'}).catch(e=>String(e))");
+await new Promise(r=>setTimeout(r,500));
+const { targetInfos: t2 } = await send("Target.getTargets");
+const sw = t2.find(t=>t.type==="service_worker" && t.url.includes(EXT));
+const { sessionId: ss } = await send("Target.attachToTarget",{targetId: sw.targetId, flatten:true});
+console.log("download from SW:", await ev(ss, `chrome.downloads.download({url: ${JSON.stringify(blobUrl)}, filename: 'kokoro-diag.txt', saveAs: false}).then(id=>'id '+id, e=>'ERR '+e.message)`));
+await new Promise(r=>setTimeout(r,1500));
+console.log("items:", await ev(ss, "chrome.downloads.search({}).then(d=>JSON.stringify(d.map(x=>({state:x.state,error:x.error,filename:x.filename,url:x.url.slice(0,50)}))))"));
+console.log("download from offscreen via sendMessage:", await ev(so, `chrome.runtime.sendMessage({target:'background', type:'download', url:${JSON.stringify(blobUrl)}, filename:'kokoro-diag2.txt', saveAs:false}).then(r=>JSON.stringify(r))`));
+console.log("anchor download from offscreen:", await ev(so, `(()=>{ try { const a=document.createElement('a'); a.href=${JSON.stringify(blobUrl)}; a.download='kokoro-diag3.txt'; document.body.appendChild(a); a.click(); a.remove(); return 'clicked'; } catch(e){ return 'ERR '+e } })()`));
+await new Promise(r=>setTimeout(r,1500));
+console.log("items:", await ev(ss, "chrome.downloads.search({}).then(d=>JSON.stringify(d.map(x=>({state:x.state,error:x.error,filename:x.filename,url:x.url.slice(0,50)}))))"));
+ws.close();

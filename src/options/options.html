@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Kokoro Reader — Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="../icons/icon48.png" width="36" height="36" alt="" />
+        <div>
+          <h1>Kokoro Reader</h1>
+          <p class="muted">Neural text-to-speech that runs entirely on your device.</p>
+        </div>
+        <span id="engine-chip" class="chip">…</span>
+      </header>
+
+      <section>
+        <h2>Voice</h2>
+        <div class="grid">
+          <label>
+            <span>Voice</span>
+            <select id="voice"></select>
+            <small id="voice-tagline" class="muted"></small>
+          </label>
+          <label>
+            <span>Blend with (optional)</span>
+            <select id="blendVoice"></select>
+            <small class="muted">Mixes two voices' style vectors for a custom timbre.</small>
+          </label>
+          <label id="blend-ratio-field">
+            <span>Blend amount <b id="blendRatio-val"></b></span>
+            <input id="blendRatio" type="range" min="0" max="1" step="0.05" />
+          </label>
+          <label>
+            <span>Speed <b id="speed-val"></b></span>
+            <input id="speed" type="range" min="0.5" max="2" step="0.05" />
+          </label>
+          <label>
+            <span>Volume <b id="volume-val"></b></span>
+            <input id="volume" type="range" min="0.1" max="1" step="0.05" />
+          </label>
+          <label>
+            <span>Pause between sentences <b id="sentenceGap-val"></b></span>
+            <input id="sentenceGap" type="range" min="0" max="0.6" step="0.02" />
+          </label>
+        </div>
+        <div class="row">
+          <input id="preview-text" type="text" value="The quick brown fox jumps over the lazy dog. Kokoro runs right here in your browser." />
+          <button id="btn-preview" class="primary">▶ Preview</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Reading</h2>
+        <div class="grid">
+          <label>
+            <span>“Read this page” reads</span>
+            <select id="extraction">
+              <option value="smart">Main content only (skips menus, sidebars, footers)</option>
+              <option value="all">Everything visible on the page</option>
+            </select>
+          </label>
+          <label>
+            <span>Sentences synthesized ahead</span>
+            <select id="lookahead">
+              <option value="1">1 (lowest memory)</option>
+              <option value="2">2</option>
+              <option value="3">3 (recommended)</option>
+              <option value="5">5</option>
+              <option value="8">8 (smoothest)</option>
+            </select>
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" id="highlight" /> Highlight the sentence being read</label>
+        <label class="check"><input type="checkbox" id="autoScroll" /> Auto-scroll to keep the current sentence in view</label>
+        <label class="check"><input type="checkbox" id="miniPlayer" /> Show the floating player on the page while reading</label>
+        <label class="check"><input type="checkbox" id="readCode" /> Also read code blocks (<code>&lt;pre&gt;</code>)</label>
+      </section>
+
+      <section>
+        <h2>Engine</h2>
+        <div class="grid">
+          <label>
+            <span>Compute device</span>
+            <select id="device">
+              <option value="auto">Auto (WebGPU when available, else CPU)</option>
+              <option value="webgpu">WebGPU (GPU)</option>
+              <option value="wasm">WASM (CPU)</option>
+            </select>
+            <small id="gpu-hint" class="muted"></small>
+          </label>
+          <label>
+            <span>Model precision</span>
+            <select id="dtype">
+              <option value="auto">Auto (fp32 on GPU, q8 on CPU)</option>
+              <option value="fp32">fp32 — best quality, ~330 MB</option>
+              <option value="fp16">fp16 — ~165 MB (GPU only)</option>
+              <option value="q8">q8 — great quality, ~90 MB, fast on CPU</option>
+              <option value="q4">q4 — ~300 MB mixed, lower quality</option>
+              <option value="q4f16">q4f16 — ~150 MB, lower quality</option>
+            </select>
+            <small class="muted">Changing device/precision reloads the model.</small>
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" id="preload" /> Load the model when Chrome starts, so reading is instant</label>
+        <div class="model-box">
+          <div class="row">
+            <div>
+              <div id="model-text">Model status…</div>
+              <div id="cache-text" class="muted small">Cache: …</div>
+            </div>
+            <div class="btns">
+              <button id="btn-load">Load model now</button>
+              <button id="btn-reload">Reload</button>
+              <button id="btn-clear" class="danger">Delete cached model</button>
+            </div>
+          </div>
+          <div class="bar"><div id="model-bar" class="fill"></div></div>
+          <div id="model-note" class="muted small"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Keyboard shortcuts</h2>
+        <table class="shortcuts">
+          <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Read the page · play / pause when already reading</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Read selected text</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Pick an element to read</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd></td><td>Stop</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Previous / next sentence (while reading)</td></tr>
+        </table>
+        <p class="muted small">Change them at <a href="#" id="shortcuts-link">chrome://extensions/shortcuts</a>. Right-click any page for “Read this page”, “Start reading from here”, “Read selection” and “Pick an element”.</p>
+      </section>
+
+      <section class="about">
+        <h2>About</h2>
+        <p class="small muted">
+          Powered by <a href="https://huggingface.co/hexgrad/Kokoro-82M" target="_blank">Kokoro-82M</a> (Apache-2.0) via
+          <a href="https://github.com/huggingface/transformers.js" target="_blank">Transformers.js</a> and ONNX Runtime Web, with phonemization by the
+          pure-JS eSpeak-NG port <a href="https://github.com/xenova/phonemizer.js" target="_blank">phonemizer</a>. Model weights are downloaded once from
+          Hugging Face (<code>onnx-community/Kokoro-82M-v1.0-ONNX</code>) and cached locally. Nothing you read ever leaves your computer.
+        </p>
+      </section>
+      <div id="toast" class="toast" hidden></div>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

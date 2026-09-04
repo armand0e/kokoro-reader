@@ -1,0 +1,22 @@
+{
+  "name": "kokoro-reader-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension that reads any web page aloud with Kokoro TTS running 100% locally (WebGPU / WASM).",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "icons": "node scripts/make-icons.mjs",
+    "test:engine": "node test/engine.test.mjs",
+    "test:chunker": "node test/chunker.test.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "kokoro-js": "^1.2.1",
+    "phonemizer": "^1.2.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

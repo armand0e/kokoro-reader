@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Kokoro Reader</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <img src="../icons/icon32.png" width="22" height="22" alt="" />
+      <h1>Kokoro Reader</h1>
+      <span id="engine-chip" class="chip">…</span>
+      <button id="btn-settings" class="icon" title="Settings">
+        <svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3.3H9l-.3 2.6a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.5L4.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.7 7.7 0 0 0 1.7 1l.3 2.6h6l.3-2.6a7.7 7.7 0 0 0 1.7-1l2.5 1 2-3.5zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+      </button>
+    </header>
+
+    <section id="model-panel" class="panel model" hidden>
+      <div class="row">
+        <span id="model-text">Model not loaded</span>
+        <button id="btn-load" class="small">Load model</button>
+      </div>
+      <div class="bar"><div id="model-bar" class="fill"></div></div>
+      <div id="model-note" class="note" hidden></div>
+    </section>
+
+    <section id="now-playing" class="panel np" hidden>
+      <div class="np-title" id="np-title"></div>
+      <div class="np-text" id="np-text"></div>
+      <div class="bar seek" id="np-bar" title="Click to jump"><div class="fill" id="np-fill"></div></div>
+      <div class="np-row">
+        <span id="np-status" class="muted"></span>
+        <span class="spacer"></span>
+        <button data-act="prev" title="Previous sentence"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+        <button data-act="toggle" id="np-toggle" class="primary" title="Play / pause"><svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg></button>
+        <button data-act="next" title="Next sentence"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+        <button data-act="stop" title="Stop"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+      </div>
+    </section>
+
+    <section class="actions">
+      <button id="btn-read" class="action primary">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <span><b>Read this page</b><small id="read-mode-hint">main content</small></span>
+      </button>
+      <div class="action-grid">
+        <button id="btn-pick" class="action">
+          <svg viewBox="0 0 24 24"><path d="M3 3h8v2H5v6H3zm10 0h8v8h-2V5h-6zM3 13h2v6h6v2H3zm11 1 7 3-3 1-1 3z"/></svg>
+          <span><b>Pick element</b><small>click part of the page</small></span>
+        </button>
+        <button id="btn-selection" class="action">
+          <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 4h12v2H3zm0 4h18v2H3zm0 4h10v2H3z"/></svg>
+          <span><b>Read selection</b><small id="sel-hint">select text first</small></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel voice">
+      <label class="field">
+        <span class="label">Voice</span>
+        <span class="select-row">
+          <select id="voice"></select>
+          <button id="btn-preview" class="small" title="Preview voice">▶ Preview</button>
+        </span>
+      </label>
+      <div id="voice-tagline" class="muted small-text"></div>
+      <label class="field">
+        <span class="label">Speed <b id="speed-val">1.0×</b></span>
+        <input id="speed" type="range" min="0.5" max="2" step="0.05" value="1" />
+      </label>
+    </section>
+
+    <section class="panel tools">
+      <button id="btn-export" class="link">⬇ Save page as WAV</button>
+      <span id="export-status" class="muted small-text"></span>
+      <button id="btn-cancel-export" class="link danger" hidden>Cancel</button>
+    </section>
+
+    <footer>
+      <span class="muted small-text">Shortcuts: <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> read/pause · <kbd>E</kbd> pick · <kbd>S</kbd> selection · <kbd>X</kbd> stop</span>
+      <div id="error" class="error" hidden></div>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
