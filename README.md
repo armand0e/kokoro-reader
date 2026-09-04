@@ -6,6 +6,10 @@ It uses WebGPU when your machine has it and falls back to WebAssembly on the CPU
 
 ## Quickstart
 
+The easy way: grab the zip from the [latest release](https://github.com/armand0e/kokoro-reader/releases/latest), unzip it, open `chrome://extensions`, turn on Developer mode, click Load unpacked and pick the unzipped folder. The build is the same for every operating system.
+
+Or build it yourself:
+
 ```bash
 git clone https://github.com/armand0e/kokoro-reader.git
 cd kokoro-reader
