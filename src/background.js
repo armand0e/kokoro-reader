@@ -221,7 +221,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         await tabAction(tab.id, "readFromHere");
         break;
       case "pick-element":
-        await tabAction(tab.id, "pick");
+        await tabAction(tab.id, "pick", { fromContextMenu: true });
         break;
       case "toggle":
         await control("toggle");

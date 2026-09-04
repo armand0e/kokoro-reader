@@ -93,7 +93,10 @@ function render() {
   }
   let text;
   if (m.status === "ready") text = `Model loaded on ${(m.device || "").toUpperCase()} (${m.dtype}).`;
-  else if (m.status === "loading") text = `Loading… ${m.progress?.pct ?? 0}%${m.progress?.total ? ` (${fmtMB(m.progress.loaded)} of ${fmtMB(m.progress.total)})` : ""}`;
+  else if (m.status === "loading") {
+    const p = m.progress || {};
+    text = `Downloading… ${p.estimated ? `about ${p.pct}%` : `${p.pct ?? 0}%`} (${fmtMB(p.loaded || 0)}${p.total && !p.estimated ? ` of ${fmtMB(p.total)}` : ""})`;
+  }
   else if (m.status === "error") text = `Error: ${m.error}`;
   else text = "Model not loaded.";
   $("#model-text").textContent = text;

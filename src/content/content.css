@@ -1,7 +1,7 @@
 /* Kokoro Reader — in-page styles */
 ::highlight(kokoro-reader-current) {
-  background-color: rgba(250, 204, 21, 0.55);
-  color: inherit;
+  background-color: rgba(250, 204, 21, 0.6);
+  color: #111;
 }
 ::highlight(kokoro-reader-block) {
   background-color: rgba(139, 92, 246, 0.1);

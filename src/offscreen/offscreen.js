@@ -24,10 +24,26 @@ const fileProgress = new Map();
 // ---------- worker RPC ----------
 let nextId = 1;
 const pending = new Map();
+const CALL_TIMEOUT = { generate: 120000, probe: 15000, dispose: 15000 }; // ms; model loads have no timeout (downloads)
 function call(msg, transfer) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    const limit = CALL_TIMEOUT[msg.type];
+    const timer = limit
+      ? setTimeout(() => {
+          if (pending.delete(id)) reject(new Error(`${msg.type} timed out after ${limit / 1000}s`));
+        }, limit)
+      : null;
+    pending.set(id, {
+      resolve: (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      reject: (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    });
     worker.postMessage({ ...msg, id }, transfer || []);
   });
 }
@@ -54,24 +70,55 @@ worker.onerror = (e) => {
   console.error("worker error", e);
   model.status = "error";
   model.error = e.message || "Worker crashed";
+  for (const p of pending.values()) p.reject(new Error(model.error));
+  pending.clear();
   emitState();
 };
 
+// Approximate sizes used when the CDN doesn't send content-length (so the progress bar still moves sensibly).
+const APPROX_SIZES = [
+  [/model_q4f16\.onnx/, 154e6],
+  [/model_q4\.onnx/, 305e6],
+  [/model_quantized\.onnx|model_q8/, 92.4e6],
+  [/model_fp16\.onnx/, 163e6],
+  [/model\.onnx/, 326e6],
+];
+function approxSize(file) {
+  for (const [re, size] of APPROX_SIZES) if (re.test(file)) return size;
+  return 0;
+}
 function onProgress(p) {
   if (!p || !p.file) return;
   if (p.status === "initiate" || p.status === "download" || p.status === "progress") {
-    fileProgress.set(p.file, { loaded: p.loaded || 0, total: p.total || 0 });
+    const cur = fileProgress.get(p.file) || { loaded: 0, total: 0, estimated: false, done: false };
+    cur.loaded = Math.max(cur.loaded, p.loaded || 0);
+    if (p.total) {
+      cur.total = p.total;
+      cur.estimated = false;
+    } else if (!cur.total) {
+      cur.total = Math.max(approxSize(p.file), cur.loaded);
+      cur.estimated = cur.total > 0;
+    }
+    if (cur.estimated) cur.total = Math.max(cur.total, cur.loaded); // never show >100 %
+    fileProgress.set(p.file, cur);
   } else if (p.status === "done") {
     const cur = fileProgress.get(p.file);
-    if (cur) cur.loaded = cur.total || cur.loaded;
+    if (cur) {
+      cur.done = true;
+      if (cur.estimated) cur.total = cur.loaded;
+      else cur.loaded = cur.total || cur.loaded;
+    }
   }
   let loaded = 0;
   let total = 0;
+  let estimated = false;
   for (const f of fileProgress.values()) {
     loaded += f.loaded;
     total += f.total;
+    estimated ||= f.estimated && !f.done;
   }
-  model.progress = { pct: total ? Math.round((loaded / total) * 100) : 0, loaded, total, file: p.file };
+  const pct = total ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
+  model.progress = { pct, loaded, total, estimated, file: p.file };
   throttledEmit();
 }
 
@@ -181,7 +228,11 @@ function newSession({ tabId, chunks, startIndex, title }) {
     status: "buffering", // buffering | playing | paused | ended | stopped
     sources: new Map(), // idx -> {src, startAt, duration}
     playhead: 0,
-    scheduledUpTo: -1,
+    generatedUpTo: -1, // highest chunk index whose audio has been generated
+    ready: [], // generated-but-not-yet-scheduled chunks (prebuffer phase)
+    prebuffer: 1, // how many chunks to have ready before the first one starts playing
+    started: false,
+    failures: 0,
     pumping: false,
   };
 }
@@ -194,25 +245,33 @@ async function play(payload) {
   try {
     await ensureModel();
   } catch (err) {
+    const tabId = session?.tabId;
     session = null;
-    emitState();
+    emitState({ endedSession: { tabId, status: "error" }, error: `Couldn't load the voice model: ${trimErr(err)}` });
     return;
   }
   if (!session) return;
-  await startFrom(session.index);
+  // Head start: synthesize the first few sentences before any audio plays, so playback never stutters chunk-to-chunk.
+  await startFrom(session.index, { prebuffer: PREBUFFER });
 }
 
-async function startFrom(index) {
+const PREBUFFER = 3;
+
+async function startFrom(index, { prebuffer = 1 } = {}) {
   if (!session) return;
   epoch++;
   worker.postMessage({ type: "cancel", epoch: epoch - 1 });
   stopSources();
   const c = audioContext();
   if (c.state === "suspended") await c.resume().catch(() => {});
-  session.index = index;
-  session.playhead = c.currentTime + 0.02;
-  session.scheduledUpTo = index - 1;
-  session.status = session.sources.size ? "playing" : "buffering";
+  const s = session;
+  s.index = index;
+  s.playhead = c.currentTime + 0.02;
+  s.generatedUpTo = index - 1;
+  s.ready = [];
+  s.started = false;
+  s.prebuffer = Math.max(1, Math.min(prebuffer, (settings.lookahead ?? 3) + 1, s.chunks.length - index));
+  s.status = "buffering";
   emitState();
   pump();
 }
@@ -266,22 +325,40 @@ async function pump() {
   session.pumping = true;
   const myEpoch = epoch;
   const s = session;
+  const flushReady = () => {
+    for (const { idx, audio } of s.ready) scheduleChunk(idx, audio);
+    s.ready = [];
+    s.started = true;
+  };
   try {
     while (session === s && epoch === myEpoch) {
-      const idx = s.scheduledUpTo + 1;
-      if (idx >= s.chunks.length) break;
-      if (idx - s.index > (settings.lookahead ?? 3)) break;
+      const idx = s.generatedUpTo + 1;
+      if (idx >= s.chunks.length || idx - s.index > (settings.lookahead ?? 3)) {
+        if (s.ready.length) flushReady(); // nothing more to generate right now → start whatever we have
+        break;
+      }
       let audio;
       try {
         audio = await ensureAudio(idx, myEpoch);
+        s.failures = 0;
       } catch (err) {
         if (err?.cancelled || session !== s || epoch !== myEpoch) return;
         console.warn("generation failed for chunk", idx, err);
-        audio = new Float32Array(0); // skip the chunk but keep going
+        s.failures = (s.failures || 0) + 1;
+        if (s.failures >= 3) {
+          // Something is wrong with the engine (GPU lost, worker crashed…) — stop instead of silently skipping everything.
+          const tabId = s.tabId;
+          stopSession("error", false);
+          emitState({ endedSession: { tabId, status: "error" }, error: `Speech synthesis failed: ${trimErr(err)}. Try Settings → Reload model, or switch the compute device to CPU.` });
+          return;
+        }
+        audio = new Float32Array(0); // skip this chunk but keep going
       }
       if (session !== s || epoch !== myEpoch) return;
-      scheduleChunk(idx, audio);
-      s.scheduledUpTo = idx;
+      s.generatedUpTo = idx;
+      s.ready.push({ idx, audio });
+      if (s.started || s.ready.length >= s.prebuffer) flushReady();
+      else emitState(); // progress of the head start ("Preparing 2 / 3")
     }
   } finally {
     if (session === s) {
@@ -388,10 +465,12 @@ function applyVoiceChange() {
   }
   const c = audioContext();
   s.playhead = current ? current.startAt + current.duration + (settings.sentenceGap ?? 0.12) : c.currentTime + 0.02;
-  s.scheduledUpTo = s.index;
+  s.ready = [];
+  s.started = true; // keep audio flowing; no new head start needed
+  s.generatedUpTo = s.index;
   if (!current) {
     // nothing is playing right now → restart the current sentence with the new voice
-    s.scheduledUpTo = s.index - 1;
+    s.generatedUpTo = s.index - 1;
   }
   pump();
 }
@@ -414,11 +493,22 @@ async function preview({ voice, text }) {
       previewSrc.stop();
     } catch {}
   }
-  const buffer = c.createBuffer(1, Math.max(1, r.audio.length), SAMPLE_RATE);
+  // Don't talk over an active reading session: pause it and resume when the sample ends.
+  const pausedSession = session && session.status !== "paused" ? session : null;
+  if (pausedSession) await pause();
+  // The main context may now be suspended → play the preview through its own short-lived context.
+  const pctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+  const buffer = pctx.createBuffer(1, Math.max(1, r.audio.length), SAMPLE_RATE);
   if (r.audio.length) buffer.copyToChannel(r.audio, 0);
-  const src = c.createBufferSource();
+  const src = pctx.createBufferSource();
   src.buffer = buffer;
-  src.connect(gain);
+  const pg = pctx.createGain();
+  pg.gain.value = settings.volume ?? 1;
+  src.connect(pg).connect(pctx.destination);
+  src.onended = () => {
+    pctx.close().catch(() => {});
+    if (pausedSession && session === pausedSession && session.status === "paused") resume();
+  };
   src.start();
   previewSrc = src;
   return { ok: true, ms: r.ms };
@@ -509,6 +599,7 @@ function publicState(extra) {
           total: session.chunks.length,
           status: session.status,
           text: session.chunks[session.index]?.text || "",
+          preparing: !session.started ? { ready: session.ready.length, target: session.prebuffer } : null,
         }
       : null,
     export: exportJob ? { index: exportJob.index, total: exportJob.total } : null,

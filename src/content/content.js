@@ -80,7 +80,6 @@ function main() {
     if (el.hidden || el.getAttribute("aria-hidden") === "true") return true;
     const s = cs(el);
     if (s.display === "none" || s.visibility === "hidden" || s.visibility === "collapse") return true;
-    if (parseFloat(s.opacity) === 0) return true;
     return false;
   }
 
@@ -193,7 +192,7 @@ function main() {
       if (isInlineNoise(el)) return;
       const spaced = isSpacedInline(el);
       if (spaced) accSpace(acc, el);
-      for (const child of el.childNodes) {
+      for (const child of renderedChildren(el)) {
         if (child.nodeType === Node.TEXT_NODE) addTextNode(acc, child);
         else if (child.nodeType === Node.ELEMENT_NODE) addInline(acc, child);
       }
@@ -208,20 +207,37 @@ function main() {
       }
       const b = accFinish(acc);
       if (!/[\p{L}\p{N}]/u.test(b.text)) return;
-      // Skip visually-hidden "screen-reader only" text (1×1 clipped boxes).
+      // Skip visually-hidden "screen-reader only" text (1×1 clipped boxes) and text that isn't rendered at all.
       const r = container.getBoundingClientRect();
-      if (r.width <= 1 && r.height <= 1) return;
+      const isContents = cs(container).display === "contents";
+      if (!isContents && r.width <= 1 && r.height <= 1) return;
+      if (isContents || (r.width === 0 && r.height === 0)) {
+        try {
+          const rr = rangeForNodes(b).getBoundingClientRect();
+          if (rr.width === 0 && rr.height === 0) return;
+        } catch {}
+      }
       blocks.push({ el: container, ...b });
     }
 
-    function visit(el) {
-      if (skipEl(el)) return;
+    /** Children in rendered order: open shadow roots and <slot> assignments are followed. */
+    function renderedChildren(el) {
+      if (el.shadowRoot) return [...el.shadowRoot.childNodes];
+      if (el.tagName === "SLOT") {
+        const assigned = el.assignedNodes({ flatten: true });
+        if (assigned.length) return assigned;
+      }
+      return [...el.childNodes];
+    }
+
+    function visit(el, isRoot = false) {
+      if (!isRoot && skipEl(el)) return;
       let run = [];
       const flush = () => {
         if (run.length) pushBlock(el, run);
         run = [];
       };
-      for (const child of el.childNodes) {
+      for (const child of renderedChildren(el)) {
         if (child.nodeType === Node.TEXT_NODE) {
           run.push(child);
           continue;
@@ -245,8 +261,15 @@ function main() {
       flush();
     }
 
-    visit(root);
+    visit(root, true);
     return blocks;
+  }
+
+  function rangeForNodes(b) {
+    const r = new Range();
+    r.setStart(b.nodes[0], b.offs[0]);
+    r.setEnd(b.nodes[b.nodes.length - 1], b.offs[b.nodes.length - 1] + 1);
+    return r;
   }
 
   /** Find the main content container for "smart" mode. */
@@ -386,6 +409,7 @@ function main() {
   // Session start helpers
   // =====================================================================
   async function startSession(blocks, startIndex = 0) {
+    stopPicker();
     const d = buildDoc(blocks);
     if (!d.chunks.length) {
       toast("No readable text found.");
@@ -485,7 +509,7 @@ function main() {
   // Element picker
   // =====================================================================
   let picker = null;
-  function startPicker() {
+  function startPicker({ seedFromContextMenu = false } = {}) {
     if (picker) return;
     const overlay = document.createElement("div");
     overlay.className = "kokoro-reader-pick-overlay";
@@ -547,6 +571,7 @@ function main() {
       if (e.key === "Escape") {
         swallow(e);
         stopPicker();
+        if (lastPlayerState?.session) ui.render(lastPlayerState);
         toast("Picking cancelled.");
       } else if (e.key === "ArrowUp") {
         swallow(e);
@@ -605,8 +630,8 @@ function main() {
         document.documentElement.classList.remove("kokoro-reader-picking");
       },
     };
-    // Seed with whatever is under the last known pointer position.
-    const seed = document.elementFromPoint(lastContext.x, lastContext.y);
+    // When started from the context menu, seed with the element that was right-clicked.
+    const seed = seedFromContextMenu && lastContext.target ? document.elementFromPoint(lastContext.x, lastContext.y) : null;
     if (seed && !ownEl(seed) && seed !== document.body && seed !== document.documentElement) {
       st.candidate = seed;
       update();
@@ -693,9 +718,9 @@ function main() {
         <div class="kr-text"></div>
         <div class="kr-bar" title="Click to jump"><div class="kr-fill"></div></div>
         <div class="kr-controls">
-          <button data-act="prev" title="Previous sentence (←)">${ICONS.prev}</button>
-          <button class="primary" data-act="toggle" title="Play / pause (space)">${ICONS.pause}</button>
-          <button data-act="next" title="Next sentence (→)">${ICONS.next}</button>
+          <button data-act="prev" title="Previous sentence (Alt+Shift+←)">${ICONS.prev}</button>
+          <button class="primary" data-act="toggle" title="Play / pause (Alt+Shift+R)">${ICONS.pause}</button>
+          <button data-act="next" title="Next sentence (Alt+Shift+→)">${ICONS.next}</button>
           <button data-act="stop" title="Stop">${ICONS.stop}</button>
           <span class="kr-spacer"></span>
           <select data-act="speed" title="Speed">
@@ -716,8 +741,7 @@ function main() {
         speed: wrap.querySelector('[data-act="speed"]'),
         toast: toastEl,
       };
-      els.speed.value = String(settings.speed);
-      if (!els.speed.value) els.speed.value = "1";
+      setSpeedOption(settings.speed);
 
       wrap.addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-act]");
@@ -759,6 +783,19 @@ function main() {
       top.addEventListener("pointerup", () => (drag = null));
     }
 
+    /** Select the matching speed option, adding a custom one if the value came from the popup slider. */
+    function setSpeedOption(speed) {
+      const v = String(Number(speed));
+      if (![...els.speed.options].some((o) => o.value === v)) {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = `${v}×`;
+        const idx = [...els.speed.options].findIndex((o) => Number(o.value) > Number(v));
+        els.speed.insertBefore(opt, idx >= 0 ? els.speed.options[idx] : null);
+      }
+      els.speed.value = v;
+    }
+
     return {
       show() {
         if (!settings.miniPlayer) return;
@@ -784,8 +821,9 @@ function main() {
         els.wrap.dataset.visible = "1";
         const m = state.model;
         let status;
-        if (m.status === "loading") status = `Loading model… ${m.progress?.pct || 0}%${m.progress?.total ? ` (${fmtMB(m.progress.loaded)} / ${fmtMB(m.progress.total)})` : ""}`;
+        if (m.status === "loading") status = `Downloading model… ${m.progress?.estimated ? `about ${m.progress.pct}%` : `${m.progress?.pct || 0}%`} (${fmtMB(m.progress?.loaded || 0)})`;
         else if (m.status === "error") status = `Model error: ${m.error}`;
+        else if (s.status === "buffering" && s.preparing) status = `Preparing audio ${Math.min(s.preparing.ready + 1, s.preparing.target)} / ${s.preparing.target}…`;
         else if (s.status === "buffering") status = `Synthesizing ${s.index + 1} / ${s.total}…`;
         else if (s.status === "paused") status = `Paused · ${s.index + 1} / ${s.total}`;
         else if (s.status === "ended") status = "Finished";
@@ -795,7 +833,7 @@ function main() {
         els.fill.style.width = `${((s.index + (s.status === "ended" ? 1 : 0)) / Math.max(1, s.total)) * 100}%`;
         els.toggle.innerHTML = s.status === "paused" ? ICONS.play : ICONS.pause;
         els.toggle.title = s.status === "paused" ? "Play" : "Pause";
-        if (state.settings?.speed != null) els.speed.value = String(state.settings.speed);
+        if (state.settings?.speed != null) setSpeedOption(state.settings.speed);
       },
       toast(msg, ms = 2600) {
         ensure();
@@ -819,11 +857,11 @@ function main() {
     if (!lastPlayerState?.session || picker) return;
     const t = e.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-    if (e.altKey && e.shiftKey) return; // extension shortcuts
-    if (e.key === "ArrowRight" && e.altKey) {
+    if (!(e.altKey && e.shiftKey) || e.ctrlKey || e.metaKey) return;
+    if (e.key === "ArrowRight") {
       e.preventDefault();
       control("next");
-    } else if (e.key === "ArrowLeft" && e.altKey) {
+    } else if (e.key === "ArrowLeft") {
       e.preventDefault();
       control("prev");
     }
@@ -834,6 +872,7 @@ function main() {
   // =====================================================================
   function onPlayerState(state) {
     lastPlayerState = state;
+    if (state.error) toast(state.error, 6000);
     if (!state.session) {
       clearHighlight();
       if (state.endedSession?.status === "ended") {
@@ -879,7 +918,7 @@ function main() {
         respond(readFromHere());
         return true;
       case "cs:pick":
-        startPicker();
+        startPicker({ seedFromContextMenu: !!msg.fromContextMenu });
         sendResponse({ ok: true });
         return false;
       case "cs:getChunks": {

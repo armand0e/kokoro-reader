@@ -82,7 +82,8 @@ function render() {
   mp.hidden = !showModel;
   if (showModel) {
     if (m.status === "loading") {
-      $("#model-text").textContent = `Downloading / loading model… ${m.progress?.pct ?? 0}%${m.progress?.total ? ` (${fmtMB(m.progress.loaded)} of ${fmtMB(m.progress.total)})` : ""}`;
+      const p = m.progress || {};
+      $("#model-text").textContent = `Downloading the voice model… ${p.estimated ? `about ${p.pct}%` : `${p.pct ?? 0}%`} (${fmtMB(p.loaded || 0)}${p.total && !p.estimated ? ` of ${fmtMB(p.total)}` : ""})`;
       $("#btn-load").hidden = true;
     } else if (m.status === "error") {
       $("#model-text").textContent = `Could not load the model: ${m.error}`;
@@ -106,7 +107,7 @@ function render() {
     $("#np-title").textContent = s.title || "";
     $("#np-text").textContent = s.text || "";
     $("#np-fill").style.width = `${(s.index / Math.max(1, s.total)) * 100}%`;
-    const label = s.status === "buffering" ? "Synthesizing…" : s.status === "paused" ? "Paused" : "Reading";
+    const label = s.status === "buffering" ? (s.preparing ? "Preparing audio…" : "Synthesizing…") : s.status === "paused" ? "Paused" : "Reading";
     $("#np-status").textContent = `${label} · ${s.index + 1} / ${s.total}`;
     $("#np-toggle").innerHTML =
       s.status === "paused"
@@ -135,7 +136,8 @@ async function act(fn) {
 function bindActions() {
   $("#btn-read").addEventListener("click", () =>
     act(async () => {
-      await bg({ type: "ui:readPage", mode: settings.extraction });
+      const r = await bg({ type: "ui:readPage", mode: settings.extraction });
+      if (r && r.ok === false) throw new Error(r.error);
       window.close();
     }),
   );

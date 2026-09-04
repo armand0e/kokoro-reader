@@ -200,6 +200,20 @@ if (offSession) {
   check("AudioContext can run in offscreen doc (autoplay ok)", acState === "running", acState);
 }
 
+// 3b. head start: the first sentences were synthesized before playback; the transition 0→1→2 must never show "buffering".
+let sawBuffering = false;
+{
+  const tB = Date.now();
+  while (Date.now() - tB < 30000) {
+    await sleep(150);
+    const s2 = await getState();
+    if (!s2?.session) break;
+    if (s2.session.index >= 2) break;
+    if (s2.session.status === "buffering" && s2.session.index > 0) sawBuffering = true;
+  }
+}
+check("prebuffer keeps first sentences gapless", !sawBuffering);
+
 // 4. progression: wait for the index to advance
 let firstIdx = st?.session?.index ?? 0;
 let advanced = false;
@@ -252,6 +266,8 @@ await inSW(`chrome.storage.local.get('settings').then(s => chrome.storage.local.
 await sleep(2500);
 st = await getState();
 check("voice/speed change keeps playing", ["playing", "buffering"].includes(st?.session?.status) && st?.settings?.voice === "am_michael", JSON.stringify(st?.settings));
+const speedShown = await evaluate(page, `(()=>{ const h=document.querySelector('kokoro-reader-ui'); return h ? 'host-closed' : 'no-host'; })()`);
+check("mini player present during speed change", speedShown === "host-closed", speedShown);
 await inSW(`chrome.storage.local.get('settings').then(s => chrome.storage.local.set({settings: {...(s.settings||{}), speed: 1, voice: 'af_heart'}}))`);
 
 // 7. stop
@@ -317,6 +333,8 @@ const popupChip = await evaluate(popup, `document.querySelector('#engine-chip')?
 const popupVoices = await evaluate(popup, `[...document.querySelectorAll('#voice option')].map(o=>o.value).join(',')`);
 check("popup renders engine status", /ready/i.test(popupChip || ""), popupChip);
 check("popup lists 6 voices", popupVoices === "af_heart,af_bella,bf_emma,am_michael,am_fenrir,am_puck", popupVoices);
+const cancelDisplay = await evaluate(popup, `getComputedStyle(document.querySelector('#btn-cancel-export')).display`);
+check("popup hides Cancel button when not exporting", cancelDisplay === "none", cancelDisplay);
 await send("Emulation.setDeviceMetricsOverride", { width: 360, height: 640, deviceScaleFactor: 1, mobile: false }, popup);
 const popShot = await send("Page.captureScreenshot", { format: "png" }, popup);
 await writeFile(`${OUT}/popup.png`, Buffer.from(popShot.data, "base64"));

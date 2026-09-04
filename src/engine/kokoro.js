@@ -48,7 +48,7 @@ export class KokoroEngine {
     if (wasmEnv && this.wasmPaths) wasmEnv.wasmPaths = this.wasmPaths;
     const hw = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 1;
     if (wasmEnv) {
-      wasmEnv.numThreads = typeof self !== "undefined" && self.crossOriginIsolated ? Math.max(1, Math.min(4, hw - 1)) : 1;
+      wasmEnv.numThreads = typeof self !== "undefined" && self.crossOriginIsolated ? Math.max(1, Math.min(8, hw - 1)) : 1;
       wasmEnv.proxy = false;
     }
 

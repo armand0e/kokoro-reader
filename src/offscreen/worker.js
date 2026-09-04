@@ -2,6 +2,13 @@
 import { KokoroEngine } from "../engine/kokoro.js";
 
 const base = new URL("../", self.location.href).href; // extension root
+
+// transformers.js warns when the Hugging Face CDN omits content-length; harmless, and we handle unknown sizes ourselves.
+const _warn = console.warn.bind(console);
+console.warn = (...args) => {
+  if (typeof args[0] === "string" && args[0].includes("Unable to determine content-length")) return;
+  _warn(...args);
+};
 const engine = new KokoroEngine({
   loadVoice: async (id) => {
     const res = await fetch(new URL(`voices/${id}.bin`, base));
