@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Kokoro Reader — Local AI Read Aloud",
   "short_name": "Kokoro Reader",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Read any web page aloud with the Kokoro-82M neural voice. Runs 100% on your device (WebGPU or WASM) — no cloud, no account.",
   "minimum_chrome_version": "116",
   "icons": {

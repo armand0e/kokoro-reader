@@ -21,6 +21,45 @@ const model = {
 };
 const fileProgress = new Map();
 
+// ---------- idle tracking ----------
+// The engine frees its memory when nothing has happened for `settings.idleUnload` minutes: the model is disposed and the
+// service worker closes this whole document (worker, WASM heap, AudioContext). Everything is recreated on the next request.
+let lastActivity = Date.now();
+function touch() {
+  lastActivity = Date.now();
+}
+setInterval(checkIdle, 15000);
+async function checkIdle() {
+  const minutes = Number(settings.idleUnload);
+  if (!minutes || minutes <= 0) return; // "keep loaded"
+  if (exportJob || loadPromise) return;
+  const idleFor = Date.now() - lastActivity;
+  if (idleFor < minutes * 60000) return;
+  if (session && session.status !== "paused") return; // actively reading
+  if (session) {
+    // Paused for a long time: free the model but keep the session so "resume" continues where it left off.
+    if (model.status === "ready") {
+      await unloadModel("paused for a while");
+    }
+    return;
+  }
+  if (model.status === "ready") await unloadModel("idle");
+  // Nothing to do here anymore → let the service worker close this document.
+  chrome.runtime.sendMessage({ target: "background", type: "engineIdle" }).catch(() => {});
+}
+async function unloadModel(reason) {
+  try {
+    await call({ type: "dispose" });
+  } catch {}
+  cache.clear();
+  model.status = "unloaded";
+  model.device = null;
+  model.dtype = null;
+  model.note = null;
+  console.info(`Kokoro Reader: model unloaded (${reason})`);
+  emitState();
+}
+
 // ---------- worker RPC ----------
 let nextId = 1;
 const pending = new Map();
@@ -238,6 +277,7 @@ function newSession({ tabId, chunks, startIndex, title }) {
 }
 
 async function play(payload) {
+  touch();
   stopSession("stopped", true); // notifies the previous tab so it clears its highlight
   session = newSession(payload);
   session.status = "buffering";
@@ -252,13 +292,12 @@ async function play(payload) {
   }
   if (!session) return;
   // Head start: synthesize the first few sentences before any audio plays, so playback never stutters chunk-to-chunk.
-  await startFrom(session.index, { prebuffer: PREBUFFER });
+  await startFrom(session.index, { prebuffer: Number(settings.headStart) || 5 });
 }
-
-const PREBUFFER = 3;
 
 async function startFrom(index, { prebuffer = 1 } = {}) {
   if (!session) return;
+  touch();
   epoch++;
   worker.postMessage({ type: "cancel", epoch: epoch - 1 });
   stopSources();
@@ -270,7 +309,8 @@ async function startFrom(index, { prebuffer = 1 } = {}) {
   s.generatedUpTo = index - 1;
   s.ready = [];
   s.started = false;
-  s.prebuffer = Math.max(1, Math.min(prebuffer, (settings.lookahead ?? 3) + 1, s.chunks.length - index));
+  s.prebuffer = Math.max(1, Math.min(prebuffer, (settings.lookahead ?? 8) + 1, s.chunks.length - index));
+  s.genStats = { genMs: 0, audioSec: 0 };
   s.status = "buffering";
   emitState();
   pump();
@@ -289,6 +329,7 @@ function stopSources() {
 
 function stopSession(status = "stopped", emit = true) {
   if (!session) return;
+  touch();
   epoch++;
   worker.postMessage({ type: "cancel", epoch: epoch - 1 });
   stopSources();
@@ -302,6 +343,7 @@ function stopSession(status = "stopped", emit = true) {
 async function ensureAudio(idx, myEpoch) {
   const key = `${idx}|${voiceKey()}`;
   if (cache.has(key)) return cache.get(key);
+  if (model.status !== "ready") await ensureModel(); // e.g. unloaded during a long pause
   const text = toSpeechText(session.chunks[idx].text);
   const r = await call({
     type: "generate",
@@ -333,13 +375,18 @@ async function pump() {
   try {
     while (session === s && epoch === myEpoch) {
       const idx = s.generatedUpTo + 1;
-      if (idx >= s.chunks.length || idx - s.index > (settings.lookahead ?? 3)) {
+      if (idx >= s.chunks.length || idx - s.index > (settings.lookahead ?? 8)) {
         if (s.ready.length) flushReady(); // nothing more to generate right now → start whatever we have
         break;
       }
       let audio;
       try {
+        const t0 = performance.now();
         audio = await ensureAudio(idx, myEpoch);
+        if (s.genStats && session === s) {
+          s.genStats.genMs += performance.now() - t0;
+          s.genStats.audioSec += audio.length / SAMPLE_RATE;
+        }
         s.failures = 0;
       } catch (err) {
         if (err?.cancelled || session !== s || epoch !== myEpoch) return;
@@ -357,8 +404,14 @@ async function pump() {
       if (session !== s || epoch !== myEpoch) return;
       s.generatedUpTo = idx;
       s.ready.push({ idx, audio });
+      if (!s.started && s.ready.length >= s.prebuffer && s.genStats && s.genStats.audioSec > 0) {
+        // Synthesis slower than playback (e.g. CPU) → keep buffering, up to the lookahead limit, before starting.
+        const ratio = s.genStats.genMs / 1000 / s.genStats.audioSec;
+        const maxPre = Math.min((settings.lookahead ?? 8) + 1, s.chunks.length - s.index);
+        if (ratio > 0.8 && s.prebuffer < maxPre) s.prebuffer = Math.min(maxPre, s.prebuffer + 2);
+      }
       if (s.started || s.ready.length >= s.prebuffer) flushReady();
-      else emitState(); // progress of the head start ("Preparing 2 / 3")
+      else emitState(); // progress of the head start ("Preparing 2 / 5")
     }
   } finally {
     if (session === s) {
@@ -400,6 +453,7 @@ function onChunkEnded(idx) {
   if (!s) return;
   const next = idx + 1;
   if (next >= s.chunks.length) {
+    touch();
     s.status = "ended";
     const ended = s;
     session = null;
@@ -415,6 +469,7 @@ function onChunkEnded(idx) {
 
 async function pause() {
   if (!session || !ctx) return;
+  touch();
   await ctx.suspend();
   session.status = "paused";
   emitState();
@@ -422,6 +477,7 @@ async function pause() {
 
 async function resume() {
   if (!session || !ctx) return;
+  touch();
   await ctx.resume();
   session.status = session.sources.has(session.index) ? "playing" : "buffering";
   emitState();
@@ -478,6 +534,7 @@ function applyVoiceChange() {
 // ---------- preview ----------
 let previewSrc = null;
 async function preview({ voice, text }) {
+  touch();
   await ensureModel();
   const sample = text || "Hi there! This is how I sound. I can read any web page for you, right here in your browser.";
   const r = await call({
@@ -518,6 +575,7 @@ async function preview({ voice, text }) {
 let exportJob = null;
 async function exportWav({ chunks, filename, saveAs = true }) {
   if (exportJob) throw new Error("An export is already running");
+  touch();
   exportJob = { index: 0, total: chunks.length, cancelled: false };
   emitState();
   try {
@@ -551,6 +609,7 @@ async function exportWav({ chunks, filename, saveAs = true }) {
     return { ok: true, seconds: totalLen / SAMPLE_RATE };
   } finally {
     exportJob = null;
+    touch();
     emitState();
   }
 }
@@ -590,7 +649,7 @@ async function clearCache() {
 // ---------- state broadcasting ----------
 function publicState(extra) {
   return {
-    model: { ...model, webgpu, threads: hwThreads },
+    model: { ...model, webgpu, threads: hwThreads, idleUnload: Number(settings.idleUnload) },
     session: session
       ? {
           tabId: session.tabId,
@@ -644,7 +703,12 @@ async function handle(msg) {
     }
     case "preload":
       if (msg.settings) settings = { ...DEFAULT_SETTINGS, ...msg.settings };
+      touch();
       ensureModel().catch(() => {});
+      return;
+    case "unload":
+      if (session) throw new Error("Can't unload while reading");
+      await unloadModel("requested");
       return;
     case "play":
       if (msg.settings) settings = { ...DEFAULT_SETTINGS, ...msg.settings };
@@ -678,6 +742,7 @@ async function handle(msg) {
     case "clearCache":
       return clearCache();
     case "reloadModel":
+      touch();
       return reloadModel();
     case "ping":
       return "pong";

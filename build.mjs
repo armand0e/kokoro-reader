@@ -13,7 +13,11 @@ const SHIPPED_VOICES = ["af_heart", "af_bella", "bf_emma", "am_michael", "am_fen
 
 async function copyStatic() {
   await mkdir(dist, { recursive: true });
-  await cp(path.join(root, "src/manifest.json"), path.join(dist, "manifest.json"));
+  // Dev builds get a unique 4th version component so Chrome treats every build as an update
+  // (otherwise it keeps a cached copy of the old service worker script across restarts).
+  const manifest = JSON.parse(await readFile(path.join(root, "src/manifest.json"), "utf8"));
+  if (process.env.KOKORO_DEV_BUILD) manifest.version = `${manifest.version}.${Math.floor(Date.now() / 60000) % 65535}`;
+  await writeFile(path.join(dist, "manifest.json"), JSON.stringify(manifest, null, 2));
   await cp(path.join(root, "src/popup/popup.html"), path.join(dist, "popup/popup.html"));
   await cp(path.join(root, "src/popup/popup.css"), path.join(dist, "popup/popup.css"));
   await cp(path.join(root, "src/options/options.html"), path.join(dist, "options/options.html"));

@@ -1,6 +1,6 @@
 {
   "name": "kokoro-reader-extension",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "description": "Chrome extension that reads any web page aloud with Kokoro TTS running 100% locally (WebGPU / WASM).",
   "type": "module",

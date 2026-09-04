@@ -72,13 +72,16 @@ function render() {
   } else if (m.status === "error") {
     chip.textContent = "Engine error";
     chip.classList.add("err");
+  } else if (m.cached) {
+    chip.textContent = "Idle · loads on demand";
   } else {
-    chip.textContent = "Model not loaded";
+    chip.textContent = "Model not downloaded";
     chip.classList.add("warn");
   }
 
   const mp = $("#model-panel");
-  const showModel = m.status !== "ready";
+  // The panel only matters before the first download, while downloading, or on error. "Idle" is the normal resting state.
+  const showModel = m.status === "loading" || m.status === "error" || (m.status !== "ready" && !m.cached);
   mp.hidden = !showModel;
   if (showModel) {
     if (m.status === "loading") {

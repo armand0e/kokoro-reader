@@ -109,6 +109,10 @@ const inSW = async (expr) => {
   }
 };
 
+// Deterministic settings for the run (also repairs leftovers from an aborted run).
+await inSW(`chrome.storage.local.set({settings: {}})`);
+log("engine start reason so far:", JSON.stringify(await inSW(`chrome.storage.session.get('engineStart').then(r => r.engineStart)`)));
+
 // Attach to offscreen document for console capture (may not exist yet).
 async function attachOffscreen() {
   const { targetInfos } = await send("Target.getTargets");
@@ -374,6 +378,46 @@ const { existsSync, statSync } = await import("node:fs");
 const wavPath = dlItem?.filename;
 const wavOk = !!wavPath && existsSync(wavPath) && statSync(wavPath).size > 44;
 check("WAV export downloads a file", ex?.ok === true && dlItem?.state === "complete" && wavOk, JSON.stringify({ ex: ex?.result, dl: dlItem, size: wavOk ? statSync(wavPath).size : 0 }));
+
+// 15. idle unload: with a 1-minute idle setting the engine must dispose the model and close its document, then reload on demand.
+await inSW(`chrome.storage.local.get('settings').then(s => chrome.storage.local.set({settings: {...(s.settings||{}), idleUnload: 1}}))`);
+await toOffscreen({ type: "stop" });
+let unloaded = false;
+const tI = Date.now();
+while (Date.now() - tI < 150000) {
+  await sleep(2000);
+  const has = await inSW(`chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']}).then(c => c.length)`);
+  if (has === 0) {
+    unloaded = true;
+    break;
+  }
+}
+const cachedAfter = await inSW(`caches.open('transformers-cache').then(c => c.keys()).then(k => k.some(x => /\.onnx/.test(x.url)))`);
+check("engine unloads and closes when idle", unloaded && cachedAfter === true, `${((Date.now() - tI) / 1000).toFixed(0)}s, cached=${cachedAfter}`);
+// popup while idle must not spin the engine back up
+const { targetId: popup2 } = await send("Target.createTarget", { url: `chrome-extension://${EXT_ID}/popup/popup.html` });
+const popupS2 = await attach(popup2);
+await sleep(1200);
+const chipIdle = await evaluate(popupS2, `document.querySelector('#engine-chip')?.textContent`);
+const stillClosed = await inSW(`chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']}).then(c => c.length)`);
+check("popup shows idle state without starting the engine", /idle/i.test(chipIdle || "") && stillClosed === 0, `${chipIdle} / contexts=${stillClosed}`);
+await send("Target.closeTarget", { targetId: popup2 });
+// reading again reloads on demand
+const { targetId: pageTarget2 } = await send("Target.createTarget", { url: PAGE_URL });
+await sleep(1500);
+const tabId2 = await inSW(`chrome.tabs.query({url: ${JSON.stringify(PAGE_URL.replace(/\/[^/]*$/, "/*"))}}).then(t => t.at(-1)?.id)`);
+await inSW(`chrome.tabs.sendMessage(${tabId2}, {type:'cs:readPage'})`);
+let reloaded = null;
+const tR = Date.now();
+while (Date.now() - tR < 60000) {
+  await sleep(700);
+  reloaded = await getState();
+  if (reloaded?.session?.status === "playing") break;
+}
+check("reading after idle reloads the model on demand", reloaded?.session?.status === "playing" && reloaded?.model?.status === "ready", `${((Date.now() - tR) / 1000).toFixed(1)}s ${reloaded?.model?.device}`);
+await toOffscreen({ type: "stop" });
+await send("Target.closeTarget", { targetId: pageTarget2 });
+await inSW(`chrome.storage.local.get('settings').then(s => chrome.storage.local.set({settings: {...(s.settings||{}), idleUnload: 5}}))`);
 
 // ---------- summary ----------
 await send("Target.closeTarget", { targetId: pageTarget });

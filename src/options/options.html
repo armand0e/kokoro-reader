@@ -63,13 +63,22 @@
             </select>
           </label>
           <label>
-            <span>Sentences synthesized ahead</span>
+            <span>Head start before playback</span>
+            <select id="headStart">
+              <option value="2">2 sentences (fastest start)</option>
+              <option value="3">3 sentences</option>
+              <option value="5">5 sentences (recommended)</option>
+              <option value="8">8 sentences</option>
+            </select>
+            <small class="muted">Grows automatically when synthesis is slower than playback (CPU mode).</small>
+          </label>
+          <label>
+            <span>Sentences kept synthesized ahead</span>
             <select id="lookahead">
-              <option value="1">1 (lowest memory)</option>
-              <option value="2">2</option>
-              <option value="3">3 (recommended)</option>
+              <option value="3">3</option>
               <option value="5">5</option>
-              <option value="8">8 (smoothest)</option>
+              <option value="8">8 (recommended)</option>
+              <option value="12">12 (smoothest)</option>
             </select>
           </label>
         </div>
@@ -104,7 +113,18 @@
             <small class="muted">Changing device/precision reloads the model.</small>
           </label>
         </div>
-        <label class="check"><input type="checkbox" id="preload" /> Load the model when Chrome starts, so reading is instant</label>
+        <label>
+          <span>Free memory when idle</span>
+          <select id="idleUnload">
+            <option value="1">After 1 minute</option>
+            <option value="2">After 2 minutes</option>
+            <option value="5">After 5 minutes (recommended)</option>
+            <option value="15">After 15 minutes</option>
+            <option value="30">After 30 minutes</option>
+            <option value="0">Never — keep the model loaded and preload it when Chrome starts</option>
+          </select>
+          <small class="muted">The model uses roughly 0.5–1 GB of GPU or system memory while loaded. Reloading from the cache takes about a second.</small>
+        </label>
         <div class="model-box">
           <div class="row">
             <div>
@@ -113,6 +133,7 @@
             </div>
             <div class="btns">
               <button id="btn-load">Load model now</button>
+              <button id="btn-unload">Unload now</button>
               <button id="btn-reload">Reload</button>
               <button id="btn-clear" class="danger">Delete cached model</button>
             </div>

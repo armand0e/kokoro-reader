@@ -8,10 +8,11 @@ let readingTabId = null;
 
 // ---------- offscreen document ----------
 let creating = null;
-async function ensureOffscreen() {
+async function ensureOffscreen(reason = "") {
   const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
   if (contexts.length > 0) return;
   if (!creating) {
+    console.info(`[Kokoro Reader] starting engine (${reason})`);
     creating = chrome.offscreen
       .createDocument({
         url: OFFSCREEN_URL,
@@ -27,11 +28,62 @@ async function ensureOffscreen() {
 }
 
 async function offscreen(msg) {
-  await ensureOffscreen();
+  await ensureOffscreen(msg.type);
   const res = await chrome.runtime.sendMessage({ ...msg, target: "offscreen" });
   if (!res) throw new Error("No response from engine");
   if (!res.ok) throw new Error(res.error || "Engine error");
   return res.result;
+}
+
+async function hasOffscreen() {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
+  return contexts.length > 0;
+}
+
+/** Talk to the engine only if it is running; otherwise return `fallback` without spinning it up. */
+async function offscreenIfRunning(msg, fallback = null) {
+  if (!(await hasOffscreen())) return fallback;
+  return offscreen(msg);
+}
+
+const IDLE_STATE = { model: { status: "unloaded", progress: { pct: 0, loaded: 0, total: 0 } }, session: null, export: null };
+
+async function closeOffscreenIfIdle() {
+  if (!(await hasOffscreen())) return;
+  try {
+    const st = await offscreen({ type: "getState" });
+    if (st?.session || st?.export || st?.model?.status === "loading") return;
+  } catch {}
+  await chrome.offscreen.closeDocument().catch(() => {});
+  lastState = { ...IDLE_STATE, model: { ...IDLE_STATE.model, cached: await modelCached() } };
+  chrome.runtime.sendMessage({ target: "popup", type: "state", state: lastState }).catch(() => {});
+}
+
+// ---------- model cache (Cache Storage is shared with the offscreen worker) ----------
+async function modelCached() {
+  try {
+    const c = await caches.open("transformers-cache");
+    const keys = await c.keys();
+    return keys.some((k) => /\.onnx/.test(k.url));
+  } catch {
+    return false;
+  }
+}
+async function cacheInfo() {
+  const out = { entries: 0, bytes: 0 };
+  try {
+    const c = await caches.open("transformers-cache");
+    for (const req of await c.keys()) {
+      const res = await c.match(req);
+      if (!res) continue;
+      out.entries++;
+      const len = Number(res.headers.get("content-length"));
+      out.bytes += len || (await res.clone().arrayBuffer()).byteLength;
+    }
+  } catch (e) {
+    out.error = String(e);
+  }
+  return out;
 }
 
 // ---------- content scripts ----------
@@ -94,6 +146,9 @@ async function route(msg, sender) {
       chrome.runtime.sendMessage({ target: "offscreen", type: "settings", settings }).catch(() => {});
       return;
     }
+    case "engineIdle":
+      await closeOffscreenIfIdle();
+      return;
     case "download":
       return chrome.downloads.download({ url: msg.url, filename: msg.filename || "kokoro-reader.wav", saveAs: msg.saveAs !== false });
 
@@ -112,10 +167,9 @@ async function route(msg, sender) {
 
     // --- from popup / options ---
     case "ui:getState": {
-      let state = lastState;
-      try {
-        state = await offscreen({ type: "getState" });
-      } catch {}
+      let state = await offscreenIfRunning({ type: "getState" }, null);
+      if (!state) state = { ...IDLE_STATE };
+      state.model = { ...state.model, cached: await modelCached() };
       return { state, readingTabId };
     }
     case "ui:readPage": {
@@ -146,10 +200,19 @@ async function route(msg, sender) {
       return offscreen({ type: "preload", settings: await getSettings() });
     case "ui:reloadModel":
       return offscreen({ type: "reloadModel" });
+    case "ui:unloadModel": {
+      await offscreenIfRunning({ type: "unload" });
+      await closeOffscreenIfIdle();
+      return;
+    }
     case "ui:cacheInfo":
-      return offscreen({ type: "cacheInfo" });
-    case "ui:clearCache":
-      return offscreen({ type: "clearCache" });
+      return cacheInfo();
+    case "ui:clearCache": {
+      if (await hasOffscreen()) await offscreen({ type: "clearCache" });
+      else await caches.delete("transformers-cache");
+      await closeOffscreenIfIdle();
+      return { ok: true };
+    }
     case "ui:exportWav": {
       const tab = await activeTab();
       const res = await tabAction(tab.id, "getChunks", { mode: msg.mode, selectionOnly: msg.selectionOnly });
@@ -173,9 +236,9 @@ async function control(action, msg = {}) {
     case "stop":
     case "next":
     case "prev":
-      return offscreen({ type: action });
+      return offscreenIfRunning({ type: action });
     case "seekTo":
-      return offscreen({ type: "seekTo", index: msg.index });
+      return offscreenIfRunning({ type: "seekTo", index: msg.index });
     default:
       throw new Error(`Unknown control: ${action}`);
   }
@@ -184,6 +247,7 @@ async function control(action, msg = {}) {
 // ---------- settings sync ----------
 onSettingsChanged((settings) => {
   chrome.runtime.sendMessage({ target: "offscreen", type: "settings", settings }).catch(() => {});
+  if (Number(settings.idleUnload) === 0) preloadIfWanted();
   // Keep any reading tab informed about highlight / mini-player preferences.
   if (readingTabId != null) chrome.tabs.sendMessage(readingTabId, { type: "cs:settings", settings }).catch(() => {});
 });
@@ -286,7 +350,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
 // ---------- install / startup ----------
 async function preloadIfWanted() {
   const settings = await getSettings();
-  if (settings.preload) offscreen({ type: "preload", settings }).catch((e) => console.warn("preload failed", e));
+  // Only when the user opted into keeping the model resident (idleUnload = 0); otherwise it loads on demand.
+  if (Number(settings.idleUnload) === 0) offscreen({ type: "preload", settings }).catch((e) => console.warn("preload failed", e));
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {

@@ -138,6 +138,7 @@ function main() {
    */
   function collectBlocks(root, { mode = "smart", range = null } = {}) {
     const blocks = [];
+    const seenTexts = new Set();
     const smartRoot = mode === "smart" && (root === document.body || root === document.documentElement);
     const host = document.querySelector(HOST_TAG);
 
@@ -211,13 +212,39 @@ function main() {
       const r = container.getBoundingClientRect();
       const isContents = cs(container).display === "contents";
       if (!isContents && r.width <= 1 && r.height <= 1) return;
-      if (isContents || (r.width === 0 && r.height === 0)) {
-        try {
-          const rr = rangeForNodes(b).getBoundingClientRect();
-          if (rr.width === 0 && rr.height === 0) return;
-        } catch {}
+      let rr = null;
+      try {
+        rr = rangeForNodes(b).getBoundingClientRect();
+      } catch {}
+      if (rr) {
+        if (rr.width === 0 && rr.height === 0) return; // not rendered
+        // Positioned off the page (left:-9999px style hiding).
+        if (rr.right + window.scrollX <= 0 || rr.bottom + window.scrollY <= 0) return;
+        if (isClippedAway(container, rr)) return;
+      }
+      // Identical copies (mobile/desktop variants, sticky duplicate titles) would be read twice.
+      if (b.text.length >= 30) {
+        if (seenTexts.has(b.text)) return;
+        seenTexts.add(b.text);
       }
       blocks.push({ el: container, ...b });
+    }
+
+    /** True when an overflow-hidden ancestor's box doesn't intersect the text at all (collapsed accordions, carousels, height:0 wrappers). */
+    function isClippedAway(el, rr) {
+      let n = el;
+      let depth = 0;
+      while (n && n !== document.body && n !== document.documentElement && depth++ < 12) {
+        const s = cs(n);
+        if (s.overflowX !== "visible" || s.overflowY !== "visible" || s.clipPath !== "none" || (s.clip && s.clip !== "auto")) {
+          const ar = n.getBoundingClientRect();
+          const hiddenY = s.overflowY !== "visible" && (ar.height === 0 || rr.bottom <= ar.top || rr.top >= ar.bottom);
+          const hiddenX = s.overflowX !== "visible" && (ar.width === 0 || rr.right <= ar.left || rr.left >= ar.right);
+          if (hiddenY || hiddenX) return true;
+        }
+        n = n.parentElement;
+      }
+      return false;
     }
 
     /** Children in rendered order: open shadow roots and <slot> assignments are followed. */

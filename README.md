@@ -31,6 +31,7 @@ The voice model starts downloading right away (about 330 MB on WebGPU, about 90 
 * Six voices, the three best rated female and male ones. Heart is the default. You can also blend two voices together in the settings.
 * Speed from half to double, changeable while it is reading.
 * Save a whole page as a WAV file.
+* Loads the model only when you start reading and frees the memory again after a few idle minutes (adjustable, or keep it loaded).
 * Keyboard shortcuts: Alt Shift R to read or pause, Alt Shift E to pick an element, Alt Shift S to read the selection, Alt Shift X to stop.
 
 ## How it works
@@ -45,6 +46,8 @@ npm run test:chunker   # sentence splitter tests
 npm run test:engine    # loads the model in Node and writes a sample WAV
 node test/e2e.mjs      # full suite against a real Chrome, see notes in test/e2e.mjs
 ```
+
+If you update the files of an unpacked install, click Reload on the extension in `chrome://extensions` so Chrome picks up the new background script.
 
 ## Credits
 

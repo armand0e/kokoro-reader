@@ -8,13 +8,14 @@ export const DEFAULT_SETTINGS = {
   volume: 1.0,
   device: "auto", // auto | webgpu | wasm
   dtype: "auto", // auto | fp32 | fp16 | q8 | q4 | q4f16
-  preload: true, // load the model when the browser starts so reading is instant
+  idleUnload: 5, // minutes of inactivity before the model (and engine) is unloaded; 0 = keep loaded & preload at startup
   highlight: true, // highlight the sentence being read
   autoScroll: true,
   miniPlayer: true, // floating in-page player
   extraction: "smart", // smart (main article) | all (everything visible)
   readCode: false, // include <pre>/<code> blocks
-  lookahead: 3, // sentences to synthesize ahead of playback
+  lookahead: 8, // sentences to keep synthesized ahead of playback
+  headStart: 5, // sentences synthesized before playback starts (grows automatically when synthesis is slow)
   sentenceGap: 0.12, // seconds of silence between sentences
 };
 

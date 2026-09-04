@@ -92,18 +92,19 @@ function render() {
     chip.classList.add("warn");
   }
   let text;
-  if (m.status === "ready") text = `Model loaded on ${(m.device || "").toUpperCase()} (${m.dtype}).`;
+  if (m.status === "ready") text = `Model loaded on ${(m.device || "").toUpperCase()} (${m.dtype}).${m.idleUnload ? ` Frees memory after ${m.idleUnload} min idle.` : ""}`;
   else if (m.status === "loading") {
     const p = m.progress || {};
     text = `Downloading… ${p.estimated ? `about ${p.pct}%` : `${p.pct ?? 0}%`} (${fmtMB(p.loaded || 0)}${p.total && !p.estimated ? ` of ${fmtMB(p.total)}` : ""})`;
   }
   else if (m.status === "error") text = `Error: ${m.error}`;
-  else text = "Model not loaded.";
+  else text = m.cached ? "Model not loaded (idle). It loads automatically when you start reading." : "Model not downloaded yet.";
   $("#model-text").textContent = text;
   $("#model-bar").style.width = `${m.status === "loading" ? m.progress?.pct ?? 0 : m.status === "ready" ? 100 : 0}%`;
   $("#model-note").textContent = m.note || "";
   $("#gpu-hint").textContent = m.webgpu === true ? "WebGPU is available on this device." : m.webgpu === false ? "WebGPU is not available here — WASM (CPU) will be used." : "";
   $("#btn-load").disabled = m.status === "loading" || m.status === "ready";
+  $("#btn-unload").disabled = m.status !== "ready";
 }
 
 async function refreshCache() {
@@ -128,13 +129,14 @@ async function init() {
   bind("sentenceGap", { parse: Number });
   bind("extraction");
   bind("lookahead", { parse: Number });
+  bind("headStart", { parse: Number });
   bind("highlight", { type: "checkbox" });
   bind("autoScroll", { type: "checkbox" });
   bind("miniPlayer", { type: "checkbox" });
   bind("readCode", { type: "checkbox" });
   bind("device");
   bind("dtype");
-  bind("preload", { type: "checkbox" });
+  bind("idleUnload", { parse: Number });
   afterChange("voice");
   afterChange("blendVoice");
 
@@ -151,6 +153,17 @@ async function init() {
   });
   $("#btn-load").addEventListener("click", () => bg({ type: "ui:loadModel" }).catch((e) => toast(e.message)));
   $("#btn-reload").addEventListener("click", () => bg({ type: "ui:reloadModel" }).catch((e) => toast(e.message)));
+  $("#btn-unload").addEventListener("click", async () => {
+    try {
+      await bg({ type: "ui:unloadModel" });
+      const r = await bg({ type: "ui:getState" });
+      state = r.state;
+      render();
+      toast("Model unloaded.");
+    } catch (e) {
+      toast(e.message);
+    }
+  });
   $("#btn-clear").addEventListener("click", async () => {
     if (!confirm("Delete the cached model files? They will be downloaded again the next time you read something.")) return;
     try {
